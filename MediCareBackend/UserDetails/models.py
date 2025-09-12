@@ -17,6 +17,7 @@ class CustomUser(AbstractUser):
         ('AB+', 'AB+'), ('AB-', 'AB-'),
         ('O+', 'O+'), ('O-', 'O-'),
     ], blank=True, null=True)
+    offer= models.CharField(max_length=64,blank=True)
 
     def __str__(self):
         return self.username

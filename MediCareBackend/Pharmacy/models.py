@@ -3,7 +3,7 @@ from django.conf import settings
 
 
 class Pharmacy(models.Model):
-    pharmacy_id = models.CharField(max_length=45)
+    pharmacy_id = models.AutoField(primary_key=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     pharmacy_name = models.CharField(max_length=45, blank=True, null=True)
     location = models.CharField(max_length=45)

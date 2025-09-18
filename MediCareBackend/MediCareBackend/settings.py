@@ -37,10 +37,14 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'UserDetails',
     'rest_framework',
     'VideoCall.apps.VideoCallConfig',
+    'UserDetails',
     'Doctor',
+    'Medicine',
+    'PatientRecord',
+    'Pharmacy',
+    'Hospital'
 ]
 
 MIDDLEWARE = [

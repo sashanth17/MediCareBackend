@@ -23,4 +23,4 @@ class Doctor(models.Model):
         return timezone.now() > self.token_created_at + timedelta(minutes=minutes)
 
     def __str__(self):
-        return self.name
+        return self.user.username

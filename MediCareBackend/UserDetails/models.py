@@ -18,7 +18,9 @@ class CustomUser(AbstractUser):
         ('O+', 'O+'), ('O-', 'O-'),
     ], blank=True, null=True)
     offer= models.CharField(max_length=64,blank=True)
-
+    sdp = models.TextField(blank=True, null=True)
+    ice_candidates = models.TextField(blank=True, null=True)
+    
     def __str__(self):
         return self.username
 

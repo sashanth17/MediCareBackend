@@ -6,8 +6,8 @@ urlpatterns = [
     path('VideoCall/',include('VideoCall.urls')),
     path('patient/',include('UserDetails.urls')),
     path('Doctors/',include('Doctor.urls')),
-    path('doctor/',include('VideoCall.urls')),
     path("pharmacy/", include("Pharmacy.urls")),
-    path('patient/',include('UserDetails.urls'))
+    path('patient/',include('UserDetails.urls')),
+    path('medicines/', include('Medicine.urls')),
 ]
 

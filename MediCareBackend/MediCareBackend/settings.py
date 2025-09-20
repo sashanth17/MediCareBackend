@@ -45,7 +45,8 @@ INSTALLED_APPS = [
     'Medicine',
     'PatientRecord',
     'Pharmacy',
-    'Hospital'
+    'Hospital',
+    'channels'
 ]
 INSTALLED_APPS += ["django_extensions"]
 MIDDLEWARE = [
@@ -89,6 +90,17 @@ TEMPLATES = [
         },
     },
 ]
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}
+
+# Set ASGI application
+ASGI_APPLICATION = "MediCareBackend.asgi.application"
 
 WSGI_APPLICATION = 'MediCareBackend.wsgi.application'
 

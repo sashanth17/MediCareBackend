@@ -1,9 +1,7 @@
 from django.urls import path
-from .views import AcceptCall,RecieveCall
-from .views import CreateOffer,RecievePatientOffer
+from .views import patient_get_answer,doctor_poll_view,create_offer
 urlpatterns = [
-    path('AcceptCall/',AcceptCall),
-    path("RecieveCall/", RecieveCall, name="recieve-call"),
-    path('CreateOffer/',CreateOffer),
-    path('RecievePatientOffer/',RecievePatientOffer),
+    path('CreateOffer/', create_offer, name='CreateOffer'),
+    path('DoctorPoll/', doctor_poll_view, name='DoctorPoll'),
+    path('patient_get_answer/', patient_get_answer, name='patient_get_answer'),   
 ]

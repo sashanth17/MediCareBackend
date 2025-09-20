@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from Medicine.models import MedicineInstance, Medicine
 from Pharmacy.models import Pharmacy
-from Medicine.serializers import MedicineInstanceSerializer
+from Medicine.serializers import MedicineInstanceSerializer,MedicineSerializer
 
 class AddMedicineInstanceView(APIView):
     def post(self, request):
@@ -50,3 +50,5 @@ class RemoveMedicineInstanceView(APIView):
             return Response({"message": f"Medicine instance {instance_id} removed successfully."}, status=status.HTTP_200_OK)
         except MedicineInstance.DoesNotExist:
             return Response({"error": "Medicine instance not found."}, status=status.HTTP_404_NOT_FOUND)
+
+

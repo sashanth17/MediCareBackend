@@ -1,127 +1,104 @@
+# views.py
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from Doctor.models import Doctor
 from django.contrib.auth import get_user_model
-from collections import deque
 import json
-import base64
+from collections import deque
 
 User = get_user_model()
+
+# --- In-memory storage for simple signaling (Not for production with multiple workers) ---
+# Queue for patients waiting for a doctor
 offer_queue = deque()
+# Dictionary to hold a doctor's answer, keyed by the patient's user_id
+answer_dict = {}
+# --------------------------------------------------------------------------------------
 
+
+# -------------------- 1. Patient creates an offer --------------------
 @api_view(["POST"])
-def AcceptCall(request):
+def create_offer(request):
     """
-    Receives userId (patient), doctorUserId (doctor), sdp, ice_candidates.
-    Stores sdp/ice for doctor, generates token, updates patient with token.
+    Patient sends their SDP offer and ICE candidates.
+    The offer is added to a queue for a doctor to pick up.
     """
-    patient_id = request.data.get("userId")
-    doctor_user_id = request.data.get("doctorUserId")
+    user_id = request.data.get("user_id")
     sdp = request.data.get("sdp")
-    ice = request.data.get("ice_candidates")
+    ice_candidates = request.data.get("ice_candidates", [])
 
-    if not all([patient_id, doctor_user_id, sdp, ice]):
-        return Response({"error": "patientId, doctorUserId, sdp, ice_candidates are required"},
-                        status=status.HTTP_400_BAD_REQUEST)
+    if not all([user_id, sdp]):
+        return Response({"error": "user_id and sdp are required"}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Verify the user exists
     try:
-        doctor_user = User.objects.get(id=doctor_user_id)
-        patient_user = User.objects.get(id=patient_id)
+        User.objects.get(id=user_id)
     except User.DoesNotExist:
         return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    doctor_detail, _ = Doctor.objects.get_or_create(user=doctor_user)
-    doctor_detail.sdp = sdp
-    doctor_detail.ice_candidates = json.dumps(ice)  # ✅ Store as JSON string
-    token = doctor_detail.generate_token()
-    doctor_detail.save(update_fields=["sdp", "ice_candidates", "token", "token_created_at"])
+    # NOTE: Removed the unnecessary database save. The in-memory queue is sufficient.
 
-    patient_user.offer = token
-    patient_user.save(update_fields=["offer"])
-
-    return Response({
-        "message": "Doctor connection details updated and token linked to patient",
-        "doctorUserId": doctor_user.id,
-        "patientUserId": patient_user.id,
-        "token": token,
+    # Add the patient's offer to the queue
+    offer_queue.append({
+        "user_id": user_id,
+        "sdp": sdp,
+        "ice_candidates": ice_candidates
     })
+    return Response({"status": "queued", "user_id": user_id}, status=status.HTTP_201_CREATED)
 
 
+# -------------------- 2. Doctor polls for offers and sends answers --------------------
+@api_view(["GET", "POST"])
+def doctor_poll_view(request):
+    """
+    GET: Doctor polls this endpoint to get the next patient's offer from the queue.
+    POST: Doctor sends back an SDP answer and ICE candidates for a specific patient.
+    """
+    if request.method == "GET":
+        if not offer_queue:
+            # No patients are waiting
+            return Response({"status": "empty"}, status=status.HTTP_200_OK)
+
+        # Get the next patient from the queue
+        patient_offer = offer_queue.popleft()
+        return Response(patient_offer, status=status.HTTP_200_OK)
+
+    elif request.method == "POST":
+        patient_id = request.data.get("patient_id")
+        sdp = request.data.get("sdp")
+        ice_candidates = request.data.get("ice_candidates", [])
+
+        if not all([patient_id, sdp]):
+            return Response({"error": "patient_id and sdp are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Store the answer in our dictionary, ensuring the key is a string for consistency.
+        answer_dict[str(patient_id)] = {
+            "sdp": sdp,
+            "ice_candidates": ice_candidates
+        }
+        return Response({"status": "answer stored"}, status=status.HTTP_200_OK)
+
+
+# -------------------- 3. Patient polls for the answer --------------------
 @api_view(["GET"])
-def RecieveCall(request):
+def patient_get_answer(request):
     """
-    Patient polls for doctor’s SDP and ICE using stored token.
+    Patient polls this endpoint with their user_id to see if a doctor has
+    responded with an answer yet.
     """
-    user_id = request.query_params.get("userId")
+    user_id = request.query_params.get("user_id")
+
     if not user_id:
-        return Response({"error": "userId is required"}, status=400)
+        return Response({"error": "user_id query parameter is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    try:
-        patient_user = User.objects.get(id=user_id)
-    except User.DoesNotExist:
-        return Response({"error": "Patient not found"}, status=404)
+    # **FIXED LOGIC HERE**
+    # Atomically get and remove the answer for the user_id.
+    # Using .pop() with a default value of None is clean and safe.
+    answer = answer_dict.pop(str(user_id), None)
 
-    if not patient_user.offer:
-        return Response({"message": "No offer available"}, status=200)
-
-    try:
-        doctor_detail = Doctor.objects.get(token=patient_user.offer)
-    except Doctor.DoesNotExist:
-        return Response({"error": "Doctor details not found"}, status=404)
-
-    return Response({
-        "doctorUserId": doctor_detail.user.id,
-        "sdp": doctor_detail.sdp,
-        "ice_candidates": json.loads(doctor_detail.ice_candidates),  # ✅ Return parsed JSON
-    })
-
-
-@api_view(["POST"])
-def CreateOffer(request):
-    """
-    Receives userId, sdp, ice_candidates.
-    Updates user's SDP and ICE, pushes userId into queue.
-    """
-    user_id = request.data.get("userId")
-    sdp = request.data.get("sdp")
-    ice = request.data.get("ice_candidates")
-
-    if not all([user_id, sdp, ice]):
-        return Response({"error": "userId, sdp, ice_candidates are required"},
-                        status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        user = User.objects.get(id=user_id)
-    except User.DoesNotExist:
-        return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-
-    user.sdp = sdp
-    user.ice_candidates = json.dumps(ice)  # ✅ Store as JSON
-    user.save(update_fields=["sdp", "ice_candidates"])
-
-    offer_queue.append(user_id)
-
-    return Response({"message": "User SDP and ICE updated", "userId": user.id})
-
-
-@api_view(["GET"])
-def RecievePatientOffer(request):
-    """
-    Pops userId from queue and returns their SDP + ICE.
-    """
-    if not offer_queue:
-        return Response({"message": "No offers available"}, status=200)
-
-    user_id = offer_queue.popleft()
-
-    try:
-        user = User.objects.get(id=user_id)
-    except User.DoesNotExist:
-        return Response({"error": "User not found"}, status=404)
-
-    return Response({
-        "userId": user.id,
-        "sdp": user.sdp,
-        "ice_candidates": json.loads(user.ice_candidates),  # ✅ Parse JSON before sending
-    })
+    if answer:
+        # If an answer was found, return it
+        return Response(answer, status=status.HTTP_200_OK)
+    else:
+        # If no answer is ready for this user_id, let them know.
+        return Response({"status": "no answer yet"}, status=status.HTTP_200_OK)

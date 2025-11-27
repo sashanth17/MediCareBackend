@@ -46,7 +46,8 @@ INSTALLED_APPS = [
     'PatientRecord',
     'Pharmacy',
     'Hospital',
-    'channels'
+    'channels',
+    'appointments',
 ]
 INSTALLED_APPS += ["django_extensions"]
 MIDDLEWARE = [

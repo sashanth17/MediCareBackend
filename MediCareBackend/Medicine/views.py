@@ -77,3 +77,4 @@ class SearchMedicineByNameAPIView(APIView):
             {"searched_for": q, "medicine_found": med_data},
             status=status.HTTP_200_OK
         )
+ 

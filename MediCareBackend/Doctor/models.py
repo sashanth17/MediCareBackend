@@ -8,6 +8,7 @@ class Doctor(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL,on_delete=models.CASCADE,null=True)
     sdp = models.TextField(blank=True, null=True)
     ice_candidates = models.TextField(blank=True, null=True)
+    designation = models.CharField(max_length=100, blank=True, null=True)
     token = models.CharField(max_length=64,editable=False,blank=True)
     token_created_at = models.DateTimeField(auto_now_add=True)
 

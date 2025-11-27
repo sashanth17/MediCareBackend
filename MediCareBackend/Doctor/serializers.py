@@ -6,13 +6,13 @@ class DoctorSerializer(serializers.ModelSerializer):
     user = UserListSerializer(read_only=True)
     class Meta:
         model = Doctor
-        fields = ['user']
+        fields = ['user','designation']
 class DoctorDetailSerializer(serializers.ModelSerializer):
     user = UserUpdateSerializer()  # nested serializer
 
     class Meta:
         model = Doctor
-        fields = ['user', 'sdp', 'ice_candidates']
+        fields = ['user', 'sdp', 'ice_candidates','designation']
 
     def update(self, instance, validated_data):
         # pop nested user data

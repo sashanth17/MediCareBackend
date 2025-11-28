@@ -43,41 +43,57 @@ class DoctorDetailView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# ---------------------------------------------------------
-# Search Doctors by Designation
-# ---------------------------------------------------------
-class SearchDoctorByDesignationAPIView(APIView):
-    """
-    GET /Doctors/search/?q=cardio
+from django.db.models import Q, Count
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
 
-    Searches doctors by designation (case-insensitive).
-    """
+from .models import Doctor
+from .serializers import DoctorDetailSerializer
 
+
+class SearchDoctorsAPIView(APIView):
+    """
+    GET /doctors/search/?q=<query>
+    Search doctors by related user name (first/last/username) OR by designation.
+    Returns all matching doctors with appointment_count annotated.
+    """
     def get(self, request):
-        query = (request.query_params.get("q") or "").strip()
+        q = (request.query_params.get("q") or "").strip()
+        if not q:
+            return Response({"detail": "Query parameter 'q' is required."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
-        if not query:
-            return Response(
-                {"detail": "Query parameter 'q' is required."},
-                status=status.HTTP_400_BAD_REQUEST
+        # Annotate each doctor with the number of related appointments
+        qs = (
+            Doctor.objects
+            .annotate(appointment_count=Count("appointments"))
+            .filter(
+                Q(user__first_name__icontains=q) |
+                Q(user__last_name__icontains=q) |
+                Q(user__username__icontains=q) |
+                Q(designation__icontains=q)
             )
-
-        doctors = Doctor.objects.filter(designation__icontains=query)
-
-
-        if not doctors.exists():
-            return Response(
-                {"detail": f"No doctor found for '{query}'"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        serializer = DoctorSerializer(doctors, many=True)
-
-        return Response(
-            {
-                "searched_for": query,
-                "count": doctors.count(),
-                "results": serializer.data
-            },
-            status=status.HTTP_200_OK
+            .distinct()
         )
+
+        if not qs.exists():
+            return Response({"detail": f"No doctors found matching '{q}'."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        serializer = DoctorDetailSerializer(qs, many=True)
+        serialized_data = serializer.data
+
+        # Inject appointment_count (comes from annotation on each model instance)
+        results = []
+        for doctor_obj, doc_data in zip(qs, serialized_data):
+            doc_data = dict(doc_data)  # make mutable copy
+            doc_data["appointment_count"] = getattr(doctor_obj, "appointment_count", 0)
+            results.append(doc_data)
+
+        return Response({
+            "searched_for": q,
+            "count": qs.count(),
+            "results": results
+        }, status=status.HTTP_200_OK)
+

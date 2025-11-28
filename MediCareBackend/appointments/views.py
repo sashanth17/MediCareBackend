@@ -1,3 +1,4 @@
+# views.py
 from datetime import date as date_cls
 from typing import Optional
 
@@ -9,16 +10,17 @@ from django.db.models import Q
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.generics import ListAPIView
 
 from .models import Appointment
-from .serializers import AppointmentSerializer
+from .serializers import AppointmentSerializer, AppointmentCreateByPhoneSerializer
 from Doctor.models import Doctor
 
 User = get_user_model()
 
 
 # -----------------------
-# Helper functions
+# Helpers (re-used)
 # -----------------------
 def _parse_date_param(date_str: Optional[str]) -> date_cls:
     """
@@ -30,25 +32,19 @@ def _parse_date_param(date_str: Optional[str]) -> date_cls:
     return timezone.localdate()
 
 
-def _get_patient_from_request(request, data: dict):
-    """
-    Resolve patient: prefer authenticated user; otherwise expect patient_id in POST data.
-    """
-    if request.user and request.user.is_authenticated:
-        return request.user
-    patient_id = data.get("patient_id")
-    if not patient_id:
-        return None
-    return get_object_or_404(User, pk=patient_id)
-
-
 def _doctor_display_name(doctor: Doctor) -> str:
+    # flexible display depending on doctor model structure
+    if hasattr(doctor, "name"):
+        return doctor.name
     if hasattr(doctor, "user") and callable(getattr(doctor.user, "get_full_name", None)):
         return doctor.user.get_full_name() or doctor.user.username
-    return getattr(doctor, "id", "Unknown")
+    return str(doctor)
 
 
 def _is_now_within_doctor_time(doctor: Doctor) -> bool:
+    # guard: if doctor model has start_time/end_time, check them; otherwise allow
+    if not (hasattr(doctor, "start_time") and hasattr(doctor, "end_time")):
+        return True
     now = timezone.localtime().time()
     return doctor.start_time <= now <= doctor.end_time
 
@@ -56,58 +52,57 @@ def _is_now_within_doctor_time(doctor: Doctor) -> bool:
 # -----------------------
 # Views
 # -----------------------
-class BookAppointmentAPIView(APIView):
+class BookAppointmentByPhoneAPIView(APIView):
     """
-    Create a new Appointment and return serialized instance.
+    Book appointment using doctor's name (partial match) and a registered user's phone_number.
     """
     def post(self, request):
-        data = request.data or {}
+        serializer = AppointmentCreateByPhoneSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-        doctor = get_object_or_404(Doctor, pk=data.get("doctor_id"))
+        appointment = serializer.save()
 
-        patient = _get_patient_from_request(request, data)
-        if not patient:
-            return Response(
-                {"detail": "Patient not provided and user not authenticated."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # parse appointment_date or use today
-        try:
-            appointment_date = _parse_date_param(data.get("appointment_date"))
-        except ValueError:
-            return Response(
-                {"detail": "Invalid date format. Use YYYY-MM-DD."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # optional: ensure booking permitted during doctor's hours when booking for today
-        if appointment_date == timezone.localdate() and not _is_now_within_doctor_time(doctor):
+        # Optional: prevent same-day booking outside working hours
+        if appointment.appointment_date == timezone.localdate() and not _is_now_within_doctor_time(appointment.doctor):
+            # rollback created appointment to avoid leaving an invalid booking
+            appointment.delete()
             return Response({"detail": "Doctor not available at this time"}, status=status.HTTP_400_BAD_REQUEST)
 
-        appointment_number = Appointment.issue_appointment_number(doctor, appointment_date)
-
-        appt = Appointment.objects.create(
-            doctor=doctor,
-            patient=patient,
-            appointment_date=appointment_date,
-            appointment_number=appointment_number,
-            status="booked",
-            notes=data.get("notes", "")
-        )
-
-        serializer = AppointmentSerializer(appt)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        response_data = AppointmentSerializer(appointment).data
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
 
-class AppointmentsForDateAPIView(APIView):
+class AppointmentListAPIView(ListAPIView):
     """
-    GET appointments for a doctor on a specific date.
-    URL example: /api/doctor/<doctor_id>/appointments/?date=YYYY-MM-DD
+    List all appointments. You can add pagination by configuring DRF pagination.
     """
-    def get(self, request, doctor_id):
-        doctor = get_object_or_404(Doctor, pk=doctor_id)
+    queryset = Appointment.objects.all().order_by("-created_at")
+    serializer_class = AppointmentSerializer
 
+
+class AppointmentsForDoctorAPIView(APIView):
+    """
+    Returns all appointments for a doctor.
+    Two ways to call:
+      - by doctor_id: GET /api/appointments/doctor/<int:doctor_id>/
+      - by doctor_name query param: GET /api/appointments/doctor/?name=Dr%20John
+    """
+    def get(self, request, doctor_id=None):
+        name_q = request.query_params.get("name")
+        doctor = None
+
+        if doctor_id is not None:
+            doctor = get_object_or_404(Doctor, pk=doctor_id)
+        elif name_q:
+            qs = Doctor.objects.filter(name__icontains=name_q.strip())
+            if not qs.exists():
+                return Response({"detail": f"No doctor found matching '{name_q}'"}, status=status.HTTP_404_NOT_FOUND)
+            doctor = qs.first()
+        else:
+            return Response({"detail": "Provide doctor_id in path or name query parameter."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # optional date filter ?date=YYYY-MM-DD
         try:
             the_date = _parse_date_param(request.query_params.get("date"))
         except ValueError:
@@ -115,7 +110,11 @@ class AppointmentsForDateAPIView(APIView):
 
         appts = Appointment.appointments_for_date(doctor, the_date)
         serializer = AppointmentSerializer(appts, many=True)
-        return Response({"date": str(the_date), "appointments": serializer.data}, status=status.HTTP_200_OK)
+        return Response({
+            "doctor": _doctor_display_name(doctor),
+            "date": str(the_date),
+            "appointments": serializer.data
+        }, status=status.HTTP_200_OK)
 
 
 class StartAppointmentAPIView(APIView):
@@ -172,21 +171,24 @@ class NextAppointmentAPIView(APIView):
 
         return Response(AppointmentSerializer(next_appt).data, status=status.HTTP_200_OK)
 
+# paste/replace this class in views.py
+from django.db.models import Q  # ensure this import exists at top of views.py
 
 class SearchAppointmentsByDoctorNameAPIView(APIView):
     """
-    Search appointments by doctor name using ?q= (matches user.username, first_name, last_name).
-    Example: /api/appointments/search/?q=kumar&date=YYYY-MM-DD
+    Search appointments by doctor name using ?q= (matches Doctor.user first_name, last_name, username).
+    Example: /api/appointments/search/?q=john&date=YYYY-MM-DD
     """
     def get(self, request):
         q = (request.query_params.get("q") or "").strip()
         if not q:
             return Response({"detail": "Query parameter 'q' is required."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Search doctor by related user fields (first_name, last_name, username)
         doctor_qs = Doctor.objects.filter(
-            Q(user__username__icontains=q) |
             Q(user__first_name__icontains=q) |
-            Q(user__last_name__icontains=q)
+            Q(user__last_name__icontains=q) |
+            Q(user__username__icontains=q)
         )
 
         if not doctor_qs.exists():
@@ -208,3 +210,4 @@ class SearchAppointmentsByDoctorNameAPIView(APIView):
             "date": str(the_date),
             "appointments": serializer.data
         }, status=status.HTTP_200_OK)
+

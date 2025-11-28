@@ -23,7 +23,9 @@ class CustomUser(AbstractUser):
     
     def __str__(self):
         return self.username
-
+    
+    def get_id(self):
+        return self.id 
     @property
     def age(self):
         """Return age based on date_of_birth"""

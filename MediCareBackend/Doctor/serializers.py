@@ -6,7 +6,7 @@ class DoctorSerializer(serializers.ModelSerializer):
     user = UserListSerializer(read_only=True)
     class Meta:
         model = Doctor
-        fields = ['user','designation']
+        fields = ['id','user','designation']
 class DoctorDetailSerializer(serializers.ModelSerializer):
     user = UserUpdateSerializer()  # nested serializer
 

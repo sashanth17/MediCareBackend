@@ -1,9 +1,10 @@
+# models.py
 from django.db import models, transaction
 from django.conf import settings
 from django.utils import timezone
 from datetime import date
 
-from Doctor.models import Doctor    # CHANGE if your doctor model name/path differs
+from Doctor.models import Doctor  # adjust if your Doctor model path differs
 
 
 class DailyAppointmentCounter(models.Model):
@@ -53,8 +54,7 @@ class Appointment(models.Model):
     # --- appointment number generator ---
     @classmethod
     def issue_appointment_number(cls, doctor, appointment_date):
-        from .models import DailyAppointmentCounter
-
+        # avoid circular import if this file is imported elsewhere
         with transaction.atomic():
             counter, created = DailyAppointmentCounter.objects.select_for_update().get_or_create(
                 doctor=doctor,

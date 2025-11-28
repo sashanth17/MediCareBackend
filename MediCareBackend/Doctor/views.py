@@ -64,6 +64,7 @@ class SearchDoctorByDesignationAPIView(APIView):
 
         doctors = Doctor.objects.filter(designation__icontains=query)
 
+
         if not doctors.exists():
             return Response(
                 {"detail": f"No doctor found for '{query}'"},
